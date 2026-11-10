@@ -44,10 +44,10 @@ class Migration042(GraphMigration):
         return MigrationResult()
 
 
-class Migration001Failing(GraphMigration):
+class Migration002(GraphMigration):
     """Dummy migration whose validation always reports an error."""
 
-    name: str = "001_failing_dummy_migration"
+    name: str = "002_failing_dummy_migration"
     description: str = "Dummy migration that fails validation."
     minimum_version: int = 0
     queries: list = []
@@ -293,8 +293,8 @@ class TestDoMigrate:
         [
             FailedMigrationTestCase(name="all-pending-default-output", verbose=False, migration_number=None),
             FailedMigrationTestCase(name="all-pending-verbose", verbose=True, migration_number=None),
-            FailedMigrationTestCase(name="single-migration-default-output", verbose=False, migration_number=1),
-            FailedMigrationTestCase(name="single-migration-verbose", verbose=True, migration_number=1),
+            FailedMigrationTestCase(name="single-migration-default-output", verbose=False, migration_number=2),
+            FailedMigrationTestCase(name="single-migration-verbose", verbose=True, migration_number=2),
         ],
         ids=lambda tc: tc.name,
     )
@@ -306,25 +306,25 @@ class TestDoMigrate:
         test_case: FailedMigrationTestCase,
     ) -> None:
         """A failed migration must be reported to the command so it can exit with a nonzero code."""
-        monkeypatch.setattr("infrahub.core.migrations.graph.MIGRATIONS", [Migration001Failing])
+        monkeypatch.setattr("infrahub.core.migrations.graph.MIGRATIONS", [Migration002])
         root_node = await get_root_node(db=db)
         initial_version = root_node.graph_version
 
         root_node.graph_version = 0
         await root_node.save(db=db)
 
-        result = await do_migrate(
-            db=db,
-            root_node=root_node,
-            check=False,
-            migration_number=test_case.migration_number,
-            verbose=test_case.verbose,
-        )
-
-        graph_version_after = (await get_root_node(db=db)).graph_version
-
-        root_node.graph_version = initial_version
-        await root_node.save(db=db)
+        try:
+            result = await do_migrate(
+                db=db,
+                root_node=root_node,
+                check=False,
+                migration_number=test_case.migration_number,
+                verbose=test_case.verbose,
+            )
+            graph_version_after = (await get_root_node(db=db)).graph_version
+        finally:
+            root_node.graph_version = initial_version
+            await root_node.save(db=db)
 
         assert graph_version_after == 0
         assert result is False
