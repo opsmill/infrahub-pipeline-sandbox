@@ -141,7 +141,7 @@ async def do_migrate(
     check: bool = False,
     migration_number: int | None = None,
     verbose: bool = False,
-) -> None:
+) -> bool:
     """Core migration logic that can be called independently of CLI.
 
     Args:
@@ -152,31 +152,33 @@ async def do_migrate(
         verbose: If True, leave the internal infrahub/prefect loggers unsuppressed.
             Per-migration progress is printed either way.
 
+    Returns:
+        False if a migration failed, True otherwise.
+
     """
     migrations = await detect_migration_to_run(
         current_graph_version=root_node.graph_version, migration_number=migration_number
     )
 
     if check or not migrations:
-        return
+        return True
 
     if verbose:
-        await migrate_database(
+        return await migrate_database(
             db=db,
             migrations=migrations,
             initialize=True,
             update_graph_version=(migration_number is None),
             verbose=verbose,
         )
-    else:
-        with suppress_internal_logs():
-            await migrate_database(
-                db=db,
-                migrations=migrations,
-                initialize=True,
-                update_graph_version=(migration_number is None),
-                verbose=verbose,
-            )
+    with suppress_internal_logs():
+        return await migrate_database(
+            db=db,
+            migrations=migrations,
+            initialize=True,
+            update_graph_version=(migration_number is None),
+            verbose=verbose,
+        )
 
 
 @app.command(name="migrate")
@@ -198,7 +200,12 @@ async def migrate_cmd(
         None, help="Apply a specific migration by number, regardless of current database version"
     ),
 ) -> None:
-    """Check the current format of the internal graph and apply the necessary migrations."""
+    """Check the current format of the internal graph and apply the necessary migrations.
+
+    Raises:
+        typer.Exit: If a migration fails.
+
+    """
     logging.getLogger("infrahub").setLevel(logging.WARNING)
     logging.getLogger("neo4j").setLevel(logging.ERROR)
     logging.getLogger("prefect").setLevel(logging.ERROR)
@@ -219,9 +226,14 @@ async def migrate_cmd(
         await dbdriver.close()
         return
 
-    await do_migrate(db=dbdriver, root_node=root_node, check=False, migration_number=migration_number, verbose=verbose)
+    success = await do_migrate(
+        db=dbdriver, root_node=root_node, check=False, migration_number=migration_number, verbose=verbose
+    )
 
     await dbdriver.close()
+
+    if not success:
+        raise typer.Exit(code=1)
 
 
 def display_migration_plan(migrations: Sequence[BaseMigration]) -> None:
