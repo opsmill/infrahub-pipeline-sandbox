@@ -112,7 +112,7 @@ async def upgrade_cmd(
     """Upgrade Infrahub to the latest version.
 
     Raises:
-        typer.Exit: If the prerequisite validation fails before upgrading.
+        typer.Exit: If the prerequisite validation fails before upgrading, or a database migration fails.
 
     """
     logging.getLogger("infrahub").setLevel(logging.WARNING)
@@ -141,7 +141,7 @@ async def upgrade_cmd(
         await dbdriver.close()
         return
 
-    await _upgrade_execute(
+    success = await _upgrade_execute(
         db=dbdriver,
         root_node_graph_version=root_node.graph_version,
         rebase_branches=rebase_branches,
@@ -151,6 +151,9 @@ async def upgrade_cmd(
 
     await dbdriver.close()
 
+    if not success:
+        raise typer.Exit(1)
+
 
 async def _upgrade_execute(
     db: InfrahubDatabase,
@@ -158,20 +161,25 @@ async def _upgrade_execute(
     rebase_branches: bool = False,
     interactive: bool = False,
     verbose: bool = False,
-) -> None:
-    """Execute the full upgrade sequence with structured step output."""
+) -> bool:
+    """Execute the full upgrade sequence with structured step output.
+
+    Returns:
+        False if a database migration failed and the upgrade was cancelled, True otherwise.
+
+    """
     console.log("[bold]Step 1/6: Database migrations[/bold]")
     migrations = await detect_migration_to_run(current_graph_version=root_node_graph_version)
 
     if verbose:
         if not await migrate_database(db=db, initialize=False, migrations=migrations, verbose=verbose):
             console.log(f"Upgrade cancelled due to migration failure. {FAILED_BADGE}")
-            return
+            return False
     else:
         with suppress_internal_logs():
             if not await migrate_database(db=db, initialize=False, migrations=migrations, verbose=verbose):
                 console.log(f"Upgrade cancelled due to migration failure. {FAILED_BADGE}")
-                return
+                return False
 
     console.log("[bold]Step 2/6: Internal schema[/bold]")
     await initialize_internal_schema()
@@ -219,6 +227,7 @@ async def _upgrade_execute(
                 await trigger_rebase_branches(db=db, branches=branches_to_rebase)
 
     console.log(f"[bold]Upgrade complete[/bold] {SUCCESS_BADGE}")
+    return True
 
 
 async def _upgrade_check(db: InfrahubDatabase, root_node_graph_version: int) -> None:
