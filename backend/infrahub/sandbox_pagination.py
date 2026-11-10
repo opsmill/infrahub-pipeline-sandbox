@@ -14,4 +14,4 @@ def count_pages(total_items: int, page_size: int) -> int:
         raise ValueError("page_size must be at least 1")
     if total_items < 0:
         raise ValueError("total_items cannot be negative")
-    return total_items // page_size
+    return -(-total_items // page_size)
